@@ -49,42 +49,43 @@ def GetBlocks(sb3):
 # Replace uids with shortened versions
 def OptimizeBlockUIDs(sb3):
     # Holds the uids and how many times they are used
-    freq = {}
+    uids = {}
+    blocks = []
 
     # If the id has been counted, add 1. Else, return 1.
-    addid = lambda id: id in freq and freq[id] + 1 or 1
+    addid = lambda u, k: k in uids and uids[k] + [(u, k)] or [(u, k)]
 
     log.debug("Counting block uids...")
 
-    # Count all the block uids
-    for uid, block in GetBlocks(sb3):
-        # Count the block's uid
-        freq[uid] = addid(uid)
-
-        # Check that it isn't a variable/list
+    for target in sb3["targets"]:
+        for uid, block in target["blocks"].items():
+            uids[uid] = []
+            blocks.append(block)
+    
+    for block in blocks:
+        # Check that this is a normal block
         if type(block) == dict:
-            # Add t
+            # Add uids to the list
             if "parent" in block and block["parent"]:
-                freq[uid] = addid(block["parent"])
+                uids[block["parent"]].append((block, "parent"))
             if "next" in block and block["next"]:
-                freq[uid] = addid(block["next"])
+                uids[block["next"]].append((block, "next"))
 
-            for name, value in block["inputs"].items():
+            for value in block["inputs"].values():
                 if value[0] == 1: # Wrapper; block or value
-                    if type(value[1]) == list:
+                    if type(value[1]) == list: # Block if value[1][0] is 2
                         value = value[1]
-                    else:
-                        value = [2, value[1]]
-                elif value[0] == 3: # Block covering a value
-                    value = [2, value[1]]
-                
+                    elif value[1]: # It's a block
+                        uids[value[1]].append((value, 1))
+                elif value[0] == 3 and type(value[1]) == str: # Block covering a value
+                    uids[value[1]].append((value, 1))
                 if value[0] == 2 and type(value[1]) == str: # It's a block
-                    freq[value[1]] = addid(value[1])
+                    uids[value[1]].append((value, 1))
 
     log.debug("Assigning block uids...")
     
-    # Sort the uids based on frequency,
-    freq = sorted(freq.items(), key=lambda d: d[1], reverse=True)
+    # Sort the uids based on frequency
+    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
 
     # Assign new ids starting with shorter ones
     new_uids = {}
@@ -98,29 +99,11 @@ def OptimizeBlockUIDs(sb3):
         for uid in tuple(target["blocks"]):
             target["blocks"][new_uids[uid]] = target["blocks"].pop(uid)
 
-        for uid, block in target["blocks"].items():
-            if type(block) != dict:
-                continue
-            if "parent" in block and block["parent"]:
-                block["parent"] = new_uids[block["parent"]]
-            if "next" in block and block["next"]:
-                block["next"] = new_uids[block["next"]]
-
-            for name, value in block["inputs"].items():
-                if value[0] == 1: # Wrapper; block or value
-                    if type(value[1]) == list:
-                        value = value[1]
-                    elif value[1]:
-                        value[1] = new_uids[value[1]]\
-            
-                elif value[0] == 3 and type(value[1]) != list: # Block covering a value
-                    value[1] = new_uids[value[1]]
-
-                if value[0] == 2 and type(value[1]) != list: # It's a block
-                    if value[1] in new_uids:
-                       value[1] = new_uids[value[1]]
-                    else:
-                        pass # TODO Record missing uids?
+    for uid, usages in uids.items():
+            for key, container in usages:
+                container[key] = new_uids[uid]
+        
+    
 
 
 class sb3file:
