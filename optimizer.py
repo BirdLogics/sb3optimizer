@@ -22,14 +22,18 @@ def main():
 
     # Make sure everything loaded correctly
     if sb3:
+        # block_uids, variable_uids, broadcast_uids, value_usage
+        log.info("Processing sb3 file...")
+        usages = GetUsages(sb3)
+
         log.info("Optimizing block uids...")
-        OptimizeBlockUIDs(sb3)
+        OptimizeBlockUIDs(usages[0], sb3["targets"])
 
         log.info("Removing monitors...")
         RemoveMonitors(sb3, True)
 
         log.info("Optimizing variable/list uids...")
-        OptimizeVariableUIDs(sb3)
+        OptimizeVariableUIDs(usages[1], sb3["targets"])
 
         # Save the new sb3
         log.info("Saving results...")
@@ -39,81 +43,131 @@ def main():
         log.critical("Failed to load the sb3 project.")
 
 # Gets a small, unique uid
-def GetUID(chars):
+def uidIter(chars):
     r = 1 # Number of character that make up the uid
     while True:
         for c in itertools.combinations_with_replacement(chars, r):
             yield c
         r += 1
 
-def GetBlocks(sb3):
+def GetUsages(sb3):
+    """Gets usage of blocks, variables, broadcasts, strings"""
+    block_uids = {}
+    variable_uids = {}
+    broadcast_uids = {}
+    value_usage = []
+
+    log.debug("Finding uid/type usages...")
+
+    # Get initial uids
     for target in sb3["targets"]:
-        for block in target["blocks"].items():
-            yield block
-
-# Replace uids with shortened versions
-def OptimizeBlockUIDs(sb3):
-    uids = {} # Holds uids and their usage
-    blocks = [] # Holds every block in the project
-    new_uids = {} # Holds the new uids
-
-    log.debug("Counting block uids...")
-
-    # Initialize with the uids for each block
-    for target in sb3["targets"]:
-        for uid, block in target["blocks"].items():
-            uids[uid] = []
-            blocks.append(block)
+        for uid in target["blocks"]:
+            block_uids[uid] = []
+        for uid in target["variables"]:
+            variable_uids[uid] = []
+        for uid in target["lists"]:
+            variable_uids[uid] = []
+        for uid in target["broadcasts"]:
+            broadcast_uids[uid] = []
     
     # Count each uid's usage
-    for block in blocks:
-        # Check that it is a normal block
-        if type(block) == dict:
-            # Add uids to the list
-            if "parent" in block and block["parent"]:
-                uids[block["parent"]].append(("parent", block))
-            if "next" in block and block["next"]:
-                uids[block["next"]].append(("next", block))
+    for target in sb3["targets"]:
+        for block in target["blocks"].values():
+            # Check to see if it is a block or variable
+            if type(block) == dict:
+                # Get some block uids
+                if "parent" in block and block["parent"]:
+                    block_uids[block["parent"]].append(("parent", block))
+                if "next" in block and block["next"]:
+                    block_uids[block["next"]].append(("next", block))
 
-            # Find uids in the inputs
-            for value in block["inputs"].values():
-                # Wrapper; block or value
-                if value[0] == 1:
-                    # Block if value[1][0] is 2
-                    if type(value[1]) == list:
-                        value = value[1]
-                    # It's a block
-                    elif value[1]:
-                        uids[value[1]].append((1, value))
-                
-                # Block covering a value
-                elif value[0] == 3 and type(value[1]) == str:
-                    uids[value[1]].append((1, value))
-                
-                # It's a block
-                if value[0] == 2 and type(value[1]) == str:
-                    uids[value[1]].append((1, value))
+                # Find uids in the inputs
+                for value in block["inputs"].values():
+                    # Block or value/variable
+                    if value[0] == 1 or value[0] == 2 or value[0] == 3:
+                        if type(value[1]) == str: # Block
+                            block_uids[value[1]].append((1, value))
+                            continue
+                        elif type(value[1]) == list: # Variable/Value
+                            value = value[1]
+                    
+                    # Value, broadcast, or variable
+                    if 4 <= value[0] <= 10: # Value
+                        value_usage.append((2, value))
+                    elif value[0] == 11: # Broadcast
+                        broadcast_uids[value[2]].append((2, value))
+                    elif value[0] == 12: # Variable
+                        variable_uids[value[2]].append((2, value))
+                    elif value[0] == 13: # List
+                        variable_uids[value[2]].append((2, value))
+                                    
+                fields = block["fields"]
+                if "BROADCAST_OPTION" in block["fields"]:
+                    broadcast_uids[fields["BROADCAST_OPTION"][1]].append((1, fields["BROADCAST_OPTION"]))
+                elif "VARIABLE" in block["fields"]:
+                    variable_uids[fields["VARIABLE"][1]].append((1, fields["VARIABLE"]))
+                elif "LIST" in block["fields"]:
+                    variable_uids[fields["LIST"][1]].append((1, fields["LIST"]))
+            else:
+                # Variable reporter not in a block
+                log.warning("Unused variable reporters not tested.")
+                if block[0] == 12:
+                    variable_uids[block[2]].apppend((2, value))
+                elif block[0] == 13:
+                    variable_uids[block[2]].append((2, value))
+    
+    return block_uids, variable_uids, broadcast_uids, value_usage
 
-    log.debug("Assigning block uids...")
+# Replace uids with shortened versions
+def OptimizeBlockUIDs(uids, targets):
+    log.debug("Sorting block uids...")
+    
+    # Sort the uids based on frequency
+    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
+
+    # Assign new uids starting with shorter ones
+    new_uids = {}
+    for old, new in zip(freq, uidIter(UIDCHARS)):
+        new_uids[old[0]] = ''.join(new)
+
+    log.debug("Replacing block uids...")
+
+    # Replace the old block keys
+    for target in targets:
+        for uid in tuple(target["blocks"]):
+            target["blocks"][new_uids[uid]] = target["blocks"].pop(uid)
+
+    # Replace uses of the olds uids
+    for uid, usages in uids.items():
+            for key, container in usages:
+                container[key] = new_uids[uid]
+
+def OptimizeVariableUIDs(uids, targets):
+    """Optimizes the uids for variable and lists"""
+
+    log.debug("Sorting variable uids...")
     
     # Sort the uids based on frequency
     freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
 
     # Assign new ids starting with shorter ones
-    for old, new in zip(freq, GetUID(UIDCHARS)):
+    new_uids = {}
+    for old, new in zip(freq, uidIter(UIDCHARS)):
         new_uids[old[0]] = ''.join(new)
 
-    log.debug("Replacing block uids...")
+    log.debug("Replacing variable uids...")
 
-    # Replace the old ids with new ones
-    for target in sb3["targets"]:
-        for uid in tuple(target["blocks"]):
-            target["blocks"][new_uids[uid]] = target["blocks"].pop(uid)
+    # Replace the old variable keys
+    for target in targets:
+        for uid in tuple(target["variables"]):
+            target["variables"][new_uids[uid]] = target["variables"].pop(uid)
+        for uid in tuple(target["lists"]):
+            target["lists"][new_uids[uid]] = target["lists"].pop(uid)
 
-    # Replace uses of the olds ids
+    # Replace uses of the olds uids
     for uid, usages in uids.items():
-            for key, container in usages:
-                container[key] = new_uids[uid]
+        for key, container in usages:
+            container[key] = new_uids[uid]
 
 def RemoveMonitors(sb3, removeVisible=False):
     if removeVisible:
@@ -123,78 +177,6 @@ def RemoveMonitors(sb3, removeVisible=False):
         for monitor in sb3["monitors"]:
             if not monitor["visible"]:
                 del monitor
-
-def OptimizeVariableUIDs(sb3):
-    """Optimizes the uids for variable and lists"""
-    uids = {} # Holds uids and their usage
-    new_uids = {} # Holds the new uids
-
-    log.debug("Counting variable uids...")
-
-    # Initialize with the uids for each variable/list
-    for target in sb3["targets"]:
-        for uid in target["variables"].keys():
-            uids[uid] = []
-        for uid in target["lists"].keys():
-            uids[uid] = []
-    
-    # Count each uid's usage
-    for target in sb3["targets"]:
-        for block in target["blocks"].values():
-            # Check to see if it is a block or variable
-            if type(block) == dict:
-                # Find uids in the inputs
-                for value in block["inputs"].values():
-                    # Wrapper; block or value
-                    if value[0] == 1 and type(value[1]) == list:
-                        value = value[1]
-                    # Block or variable/list
-                    elif value[0] == 3 and type(value[1]) == list:
-                        value = value[1]
-                    # Block or variable/list
-                    if value[0] == 2 and type(value[1]) == list:
-                        value = value[1]
-                    
-                    # Variable
-                    if value[0] == 12:
-                        uids[value[2]].append((2, value))
-                    elif value[0] == 13:
-                        uids[value[2]].append((2, value))
-                
-                if "VARIABLE" in block["fields"]:
-                    uids[block["fields"]["VARIABLE"][1]].append((1, block["fields"]["VARIABLE"]))
-                elif "LIST" in block["fields"]:
-                    uids[block["fields"]["LIST"][1]].append((1, block["fields"]["LIST"]))
-            else:
-                log.warning("Unused variable reporters not tested.")
-                if block[0] == 12:
-                    uids[block[2]].apppend((2, value))
-                elif block[0] == 13:
-                    uids[block[2]].append((2, value))
-            
-
-    log.debug("Assigning variable uids...")
-    
-    # Sort the uids based on frequency
-    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
-
-    # Assign new ids starting with shorter ones
-    for old, new in zip(freq, GetUID(UIDCHARS)):
-        new_uids[old[0]] = ''.join(new)
-
-    log.debug("Replacing variable uids...")
-
-    # Replace the old ids with new ones
-    for target in sb3["targets"]:
-        for uid in tuple(target["variables"]):
-            target["variables"][new_uids[uid]] = target["variables"].pop(uid)
-        for uid in tuple(target["lists"]):
-            target["lists"][new_uids[uid]] = target["lists"].pop(uid)
-
-    # Replace uses of the olds ids
-    for uid, usages in uids.items():
-        for key, container in usages:
-            container[key] = new_uids[uid]
 
 class sb3file:
     sb3_file = None # Holds the sb3 file
