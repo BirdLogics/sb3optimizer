@@ -26,14 +26,25 @@ def main():
         log.info("Processing sb3 file...")
         usages = GetUsages(sb3)
 
+        """
         log.info("Optimizing block uids...")
-        OptimizeBlockUIDs(usages[0], sb3["targets"])
+        OptimizeBlocks(usages[0], sb3["targets"])
+
+        log.info("Optimizing variable/list uids...")
+        OptimizeVariables(usages[1], sb3["targets"])
+
+        log.info("Optimizing broadcast uids...")
+        OptimizeBroadcasts(usages[2], sb3["targets"])
+        """
+
+        log.info("Optimizing uids...")
+        OptimizeUIDs(usages[0], sb3["targets"])
 
         log.info("Removing monitors...")
         RemoveMonitors(sb3, True)
 
-        log.info("Optimizing variable/list uids...")
-        OptimizeVariableUIDs(usages[1], sb3["targets"])
+        log.info("Converting strings to numbers...")
+        OptimizeValues(usages[1], sb3["targets"])
 
         # Save the new sb3
         log.info("Saving results...")
@@ -92,8 +103,8 @@ def GetUsages(sb3):
                             value = value[1]
                     
                     # Value, broadcast, or variable
-                    if 4 <= value[0] <= 10: # Value
-                        value_usage.append((2, value))
+                    if value[0] == 10: #4 <= value[0] <= 10: # Value
+                        value_usage.append(value)
                     elif value[0] == 11: # Broadcast
                         broadcast_uids[value[2]].append((2, value))
                     elif value[0] == 12: # Variable
@@ -116,12 +127,19 @@ def GetUsages(sb3):
                 elif block[0] == 13:
                     variable_uids[block[2]].append((2, value))
     
-    return block_uids, variable_uids, broadcast_uids, value_usage
+    # If a block has the same uid as one
+    # of it's inputs, Scratch fails to load.
+    # TODO Smart collision avoidance?
+    uids = {}
+    uids.update(block_uids)
+    uids.update(variable_uids)
+    uids.update(broadcast_uids)
 
-# Replace uids with shortened versions
-def OptimizeBlockUIDs(uids, targets):
-    log.debug("Sorting block uids...")
-    
+    return uids, value_usage
+
+def OptimizeUIDs(uids, targets):
+    log.debug("Sorting uids...")
+
     # Sort the uids based on frequency
     freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
 
@@ -134,7 +152,50 @@ def OptimizeBlockUIDs(uids, targets):
 
     # Replace the old block keys
     for target in targets:
-        for uid in tuple(target["blocks"]):
+        for uid in target["blocks"].copy():
+            target["blocks"][new_uids[uid]] = target["blocks"].pop(uid)
+
+    log.debug("Replacing variable uids...")
+
+    # Replace the old variable keys
+    for target in targets:
+        for uid in target["variables"].copy():
+            target["variables"][new_uids[uid]] = target["variables"].pop(uid)
+        for uid in tuple(target["lists"]):
+            target["lists"][new_uids[uid]] = target["lists"].pop(uid)
+    
+    log.debug("Replacing broadcast uids...")
+
+    # Replace the old broadcast keys
+    for target in targets:
+        for uid in target["broadcasts"].copy():
+            target["broadcasts"][new_uids[uid]] = target["broadcasts"].pop(uid)
+
+    log.debug("Replacing uid usage...")
+
+    # Replace uses of the olds uids
+    for uid, usages in uids.items():
+            for key, container in usages:
+                container[key] = new_uids[uid]
+
+def OptimizeBlocks(uids, targets):
+    log.debug("Sorting block uids...")
+    
+    log.warning("Optimizing blocks allows uid collision.")
+
+    # Sort the uids based on frequency
+    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
+
+    # Assign new uids starting with shorter ones
+    new_uids = {}
+    for old, new in zip(freq, uidIter(UIDCHARS)):
+        new_uids[old[0]] = ''.join(new)
+
+    log.debug("Replacing block uids...")
+
+    # Replace the old block keys
+    for target in targets:
+        for uid in target["blocks"].copy():
             target["blocks"][new_uids[uid]] = target["blocks"].pop(uid)
 
     # Replace uses of the olds uids
@@ -142,8 +203,10 @@ def OptimizeBlockUIDs(uids, targets):
             for key, container in usages:
                 container[key] = new_uids[uid]
 
-def OptimizeVariableUIDs(uids, targets):
+def OptimizeVariables(uids, targets):
     """Optimizes the uids for variable and lists"""
+
+    log.warning("OptimizeVariables allows uid collision.")
 
     log.debug("Sorting variable uids...")
     
@@ -159,10 +222,37 @@ def OptimizeVariableUIDs(uids, targets):
 
     # Replace the old variable keys
     for target in targets:
-        for uid in tuple(target["variables"]):
+        for uid in target["variables"].copy():
             target["variables"][new_uids[uid]] = target["variables"].pop(uid)
-        for uid in tuple(target["lists"]):
+        for uid in target["lists"].copy():
             target["lists"][new_uids[uid]] = target["lists"].pop(uid)
+
+    # Replace uses of the olds uids
+    for uid, usages in uids.items():
+        for key, container in usages:
+            container[key] = new_uids[uid]
+
+def OptimizeBroadcasts(uids, targets):
+    """Optimizes the uids for broadcasts"""
+
+    log.warning("OptimizeBroadcasts allows uid collision.")
+
+    log.debug("Sorting broadcast uids...")
+    
+    # Sort the uids based on frequency
+    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
+
+    # Assign new ids starting with shorter ones
+    new_uids = {}
+    for old, new in zip(freq, uidIter(UIDCHARS)):
+        new_uids[old[0]] = ''.join(new)
+
+    log.debug("Replacing broadcast uids...")
+
+    # Replace the old variable keys
+    for target in targets:
+        for uid in target["broadcasts"].copy():
+            target["broadcasts"][new_uids[uid]] = target["broadcasts"].pop(uid)
 
     # Replace uses of the olds uids
     for uid, usages in uids.items():
@@ -177,6 +267,46 @@ def RemoveMonitors(sb3, removeVisible=False):
         for monitor in sb3["monitors"]:
             if not monitor["visible"]:
                 del monitor
+
+def StringToNumber(value):
+    if value == "Infinity":
+        value = float("Inf")
+    elif value == "-Infinity":
+        value = float("-Inf")
+    elif value == "NaN":
+        value = float("NaN")
+    # Optimizing bools doesn't work
+    # TODO Can any bools be optimized
+    #elif value == "true":
+    #    value = True
+    #elif value == "false":
+    #    value = False
+    else:
+        try:
+            value = float(value)
+            if value == int(value):
+                value = int(value)
+        except ValueError:
+            pass # Normal
+    return value
+
+def OptimizeValues(values, targets):
+    # TODO Fix odd results
+    # String numbers being used to change costumes?
+    log.warning("Value optimization may cause unexected results.")
+
+    # Optimize variable values
+    for target in targets:
+        for variable in target["variables"].values():
+            variable[1] = StringToNumber(variable[1])
+        for l in target["lists"].values():
+            for i, item in enumerate(l[1]):
+                l[1][i] = StringToNumber(item)
+    
+    # Optimize input values
+    for value in values:
+        value[1] = StringToNumber(value[1])
+
 
 class sb3file:
     sb3_file = None # Holds the sb3 file
