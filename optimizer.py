@@ -24,7 +24,12 @@ def main():
     if sb3:
         log.info("Optimizing block uids...")
         OptimizeBlockUIDs(sb3)
+
+        log.info("Removing monitors...")
         RemoveMonitors(sb3, True)
+
+        log.info("Optimizing variable/list uids...")
+        OptimizeVariableUIDs(sb3)
 
         # Save the new sb3
         log.info("Saving results...")
@@ -114,10 +119,82 @@ def RemoveMonitors(sb3, removeVisible=False):
     if removeVisible:
         sb3["monitors"] = []
     else:
-        log.warn("Visible monitor exclusion not tested.")
+        log.warning("Visible monitor exclusion not tested.")
         for monitor in sb3["monitors"]:
             if not monitor["visible"]:
                 del monitor
+
+def OptimizeVariableUIDs(sb3):
+    """Optimizes the uids for variable and lists"""
+    uids = {} # Holds uids and their usage
+    new_uids = {} # Holds the new uids
+
+    log.debug("Counting variable uids...")
+
+    # Initialize with the uids for each variable/list
+    for target in sb3["targets"]:
+        for uid in target["variables"].keys():
+            uids[uid] = []
+        for uid in target["lists"].keys():
+            uids[uid] = []
+    
+    # Count each uid's usage
+    for target in sb3["targets"]:
+        for block in target["blocks"].values():
+            # Check to see if it is a block or variable
+            if type(block) == dict:
+                # Find uids in the inputs
+                for value in block["inputs"].values():
+                    # Wrapper; block or value
+                    if value[0] == 1 and type(value[1]) == list:
+                        value = value[1]
+                    # Block or variable/list
+                    elif value[0] == 3 and type(value[1]) == list:
+                        value = value[1]
+                    # Block or variable/list
+                    if value[0] == 2 and type(value[1]) == list:
+                        value = value[1]
+                    
+                    # Variable
+                    if value[0] == 12:
+                        uids[value[2]].append((2, value))
+                    elif value[0] == 13:
+                        uids[value[2]].append((2, value))
+                
+                if "VARIABLE" in block["fields"]:
+                    uids[block["fields"]["VARIABLE"][1]].append((1, block["fields"]["VARIABLE"]))
+                elif "LIST" in block["fields"]:
+                    uids[block["fields"]["LIST"][1]].append((1, block["fields"]["LIST"]))
+            else:
+                log.warning("Unused variable reporters not tested.")
+                if block[0] == 12:
+                    uids[block[2]].apppend((2, value))
+                elif block[0] == 13:
+                    uids[block[2]].append((2, value))
+            
+
+    log.debug("Assigning variable uids...")
+    
+    # Sort the uids based on frequency
+    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
+
+    # Assign new ids starting with shorter ones
+    for old, new in zip(freq, GetUID(UIDCHARS)):
+        new_uids[old[0]] = ''.join(new)
+
+    log.debug("Replacing variable uids...")
+
+    # Replace the old ids with new ones
+    for target in sb3["targets"]:
+        for uid in tuple(target["variables"]):
+            target["variables"][new_uids[uid]] = target["variables"].pop(uid)
+        for uid in tuple(target["lists"]):
+            target["lists"][new_uids[uid]] = target["lists"].pop(uid)
+
+    # Replace uses of the olds ids
+    for uid, usages in uids.items():
+        for key, container in usages:
+            container[key] = new_uids[uid]
 
 class sb3file:
     sb3_file = None # Holds the sb3 file
@@ -131,7 +208,7 @@ class sb3file:
     def __init__(self, sb3_path, overwrite=False, debug=False):
         self.sb3_path = sb3_path
         if not os.path.isfile(sb3_path):
-            log.warn("File %s does not exist." %sb3_path)
+            log.warning("File %s does not exist." %sb3_path)
 
         self.overwrite = overwrite
         self.debug = debug
@@ -205,7 +282,7 @@ class sb3file:
                 # Save a copy of the json
                 sb3_jfile = open(self.json_path, "w")
                 sb3_jfile.write(debug_json)
-                print("Saved debug to '%s'." % self.json_path)
+                log.info("Saved debug to '%s'.", self.json_path)
 
             if self.sb3_path == save_path:
                 log.error("Save path cannot be the same as the read path.")
@@ -247,7 +324,7 @@ class sb3file:
             if sb3_old: sb3_old.close()
             if sb3_file: sb3_file.close()
             if sb3_jfile: sb3_jfile.close()
-            elif self.debug: log.warn("Did not save debug json to '%s'." % self.json_path)
+            elif self.debug: log.warning("Did not save debug json to '%s'." % self.json_path)
        
         return False
 
