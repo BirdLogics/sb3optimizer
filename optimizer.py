@@ -117,7 +117,7 @@ def GetUsages(sb3):
                 # Variable reporter not in a block
                 log.warning("Unused variable reporters not tested.")
                 if block[0] == 12:
-                    variable_uids[block[2]].apppend((2, value))
+                    variable_uids[block[2]].append((2, value))
                 elif block[0] == 13:
                     variable_uids[block[2]].append((2, value))
     
