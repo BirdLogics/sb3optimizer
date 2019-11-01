@@ -24,7 +24,7 @@ def main():
     if sb3:
         log.info("Optimizing block uids...")
         OptimizeBlockUIDs(sb3)
-
+        RemoveMonitors(sb3, True)
 
         # Save the new sb3
         log.info("Saving results...")
@@ -48,39 +48,46 @@ def GetBlocks(sb3):
 
 # Replace uids with shortened versions
 def OptimizeBlockUIDs(sb3):
-    # Holds the uids and how many times they are used
-    uids = {}
-    blocks = []
-
-    # If the id has been counted, add 1. Else, return 1.
-    addid = lambda u, k: k in uids and uids[k] + [(u, k)] or [(u, k)]
+    uids = {} # Holds uids and their usage
+    blocks = [] # Holds every block in the project
+    new_uids = {} # Holds the new uids
 
     log.debug("Counting block uids...")
 
+    # Initialize with the uids for each block
     for target in sb3["targets"]:
         for uid, block in target["blocks"].items():
             uids[uid] = []
             blocks.append(block)
     
+    # Count each uid's usage
     for block in blocks:
-        # Check that this is a normal block
+        # Check that it is a normal block
         if type(block) == dict:
             # Add uids to the list
             if "parent" in block and block["parent"]:
-                uids[block["parent"]].append((block, "parent"))
+                uids[block["parent"]].append(("parent", block))
             if "next" in block and block["next"]:
-                uids[block["next"]].append((block, "next"))
+                uids[block["next"]].append(("next", block))
 
+            # Find uids in the inputs
             for value in block["inputs"].values():
-                if value[0] == 1: # Wrapper; block or value
-                    if type(value[1]) == list: # Block if value[1][0] is 2
+                # Wrapper; block or value
+                if value[0] == 1:
+                    # Block if value[1][0] is 2
+                    if type(value[1]) == list:
                         value = value[1]
-                    elif value[1]: # It's a block
-                        uids[value[1]].append((value, 1))
-                elif value[0] == 3 and type(value[1]) == str: # Block covering a value
-                    uids[value[1]].append((value, 1))
-                if value[0] == 2 and type(value[1]) == str: # It's a block
-                    uids[value[1]].append((value, 1))
+                    # It's a block
+                    elif value[1]:
+                        uids[value[1]].append((1, value))
+                
+                # Block covering a value
+                elif value[0] == 3 and type(value[1]) == str:
+                    uids[value[1]].append((1, value))
+                
+                # It's a block
+                if value[0] == 2 and type(value[1]) == str:
+                    uids[value[1]].append((1, value))
 
     log.debug("Assigning block uids...")
     
@@ -88,7 +95,6 @@ def OptimizeBlockUIDs(sb3):
     freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
 
     # Assign new ids starting with shorter ones
-    new_uids = {}
     for old, new in zip(freq, GetUID(UIDCHARS)):
         new_uids[old[0]] = ''.join(new)
 
@@ -99,12 +105,19 @@ def OptimizeBlockUIDs(sb3):
         for uid in tuple(target["blocks"]):
             target["blocks"][new_uids[uid]] = target["blocks"].pop(uid)
 
+    # Replace uses of the olds ids
     for uid, usages in uids.items():
             for key, container in usages:
                 container[key] = new_uids[uid]
-        
-    
 
+def RemoveMonitors(sb3, removeVisible=False):
+    if removeVisible:
+        sb3["monitors"] = []
+    else:
+        log.warn("Visible monitor exclusion not tested.")
+        for monitor in sb3["monitors"]:
+            if not monitor["visible"]:
+                del monitor
 
 class sb3file:
     sb3_file = None # Holds the sb3 file
