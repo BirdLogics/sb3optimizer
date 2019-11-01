@@ -55,13 +55,6 @@ def main(path, savePath, uidOpt, removeMonitors, overwrite=False, debug=False):
     else:
         log.critical("Failed to load the sb3 project.")
 
-def uidIter(chars):
-    r = 1 # Number of character that make up the uid
-    while True:
-        for c in itertools.combinations_with_replacement(chars, r):
-            yield c
-        r += 1
-
 def GetUsages(sb3):
     """Gets usage of blocks, variables, broadcasts, strings"""
     block_uids = {}
@@ -137,6 +130,13 @@ def GetUsages(sb3):
     uids.update(broadcast_uids)
 
     return uids, value_usage
+
+def uidIter(chars):
+    r = 1 # Number of character that make up the uid
+    while True:
+        for c in itertools.combinations_with_replacement(chars, r):
+            yield c
+        r += 1
 
 def OptimizeUIDs(uids, targets):
     log.debug("Sorting uids...")
@@ -450,7 +450,7 @@ if __name__ == "__main__":
     parser.add_argument("destination", help="save path, defaults to ./result.sb3", nargs="?", default="./result.sb3")
     parser.add_argument("-w", "--overwrite", help="overwrite existing files at the destination", action="store_true")
     parser.add_argument("-d", "--debug", help="save a debug json to './project.json' or './sprite.json' if overwrite is enabled", action="store_true")
-    parser.add_argument("-u", "--optuids", help="shrink block, variable, and broadcast uids", action="store_true")
+    parser.add_argument("-u", "--keepuids", help="keep original block, variable, and broadcast uids", action="store_false")
     parser.add_argument("-m", "--clmonitors", help="remove all monitors", action="store_true")
     groupV = parser.add_mutually_exclusive_group()
     groupV.add_argument("-s", "--silent", help="hide info from log, -ss to hide warnings", action="count", default=0)
@@ -462,7 +462,7 @@ if __name__ == "__main__":
     save_path = args.destination
     overwrite = args.overwrite
     debug = args.debug
-    uidOpt = args.optuids
+    uidOpt = args.keepuids
     removeMonitors = args.clmonitors
     verbosity = args.silent - args.verbosity
 
