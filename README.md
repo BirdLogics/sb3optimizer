@@ -3,9 +3,11 @@ Optimizer for the storage size of .sb3 files
 
 ## Instructions
 1. Download optimizer.py and put it in a folder.
-2. Put the .sb3 file in the same folder and name it "project.sb3"
+2. Put the .sb3 file in the same folder and name it 'project.sb3'
 3. Run the optimizer with Python 3. It has not been tested with Python 2.
 4. The program will save to 'result.sb3'
+
+There's no need to give credit on projects that were optimized using this.
 
 ## Arguments
 Note: These arguments may be temporary and could be changed.
