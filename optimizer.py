@@ -10,50 +10,51 @@ import shutil
 UIDCHARS = "!#%()*+,-./:;=?@[]^_`{|}~ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
 # Configure the logger
-logging.basicConfig(format="%(levelname)s: %(message)s", level=10)
+logging.basicConfig(format="%(levelname)s: %(message)s", level=20)
 log = logging.getLogger()
 
-def main():
+def main(path, savePath, uidOpt, removeMonitors, overwrite=False, debug=False):
     # Get the object to handle the sb3 file
-    sbf = sb3file("project.sb3", True, True)
+    sbf = sb3file(path, overwrite, debug)
 
     # Load the sb3 project json
     sb3 = sbf.readsb3()
 
     # Make sure everything loaded correctly
     if sb3:
-        # block_uids, variable_uids, broadcast_uids, value_usage
         log.info("Processing sb3 file...")
-        usages = GetUsages(sb3)
+        uids, values = GetUsages(sb3)
 
-        """
-        log.info("Optimizing block uids...")
-        OptimizeBlocks(usages[0], sb3["targets"])
+        # log.info("Optimizing block uids...")
+        # OptimizeBlocks(usages[0], sb3["targets"])
 
-        log.info("Optimizing variable/list uids...")
-        OptimizeVariables(usages[1], sb3["targets"])
+        # log.info("Optimizing variable/list uids...")
+        # OptimizeVariables(usages[1], sb3["targets"])
 
-        log.info("Optimizing broadcast uids...")
-        OptimizeBroadcasts(usages[2], sb3["targets"])
-        """
+        # log.info("Optimizing broadcast uids...")
+        # OptimizeBroadcasts(usages[2], sb3["targets"])
 
-        log.info("Optimizing uids...")
-        OptimizeUIDs(usages[0], sb3["targets"])
+        if uidOpt:
+            log.info("Optimizing uids...")
+            OptimizeUIDs(uids, sb3["targets"])
+        
+        if removeMonitors:
+            log.info("Removing monitors...")
+            RemoveMonitors(sb3, True)
 
-        log.info("Removing monitors...")
-        RemoveMonitors(sb3, True)
+        if not (uidOpt or removeMonitors):
+            log.warn("Nothing was changed in the sb3 json.")
 
-        log.info("Converting strings to numbers...")
-        OptimizeValues(usages[1], sb3["targets"])
+        #log.info("Converting strings to numbers...")
+        #OptimizeValues(values, sb3["targets"])
 
         # Save the new sb3
         log.info("Saving results...")
-        if not sbf.savesb3("result.sb3.zip", sb3):
+        if not sbf.savesb3(save_path, sb3):
             log.critical("Failed to save the sb3 project.")
     else:
         log.critical("Failed to load the sb3 project.")
 
-# Gets a small, unique uid
 def uidIter(chars):
     r = 1 # Number of character that make up the uid
     while True:
@@ -178,87 +179,6 @@ def OptimizeUIDs(uids, targets):
             for key, container in usages:
                 container[key] = new_uids[uid]
 
-def OptimizeBlocks(uids, targets):
-    log.debug("Sorting block uids...")
-    
-    log.warning("Optimizing blocks allows uid collision.")
-
-    # Sort the uids based on frequency
-    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
-
-    # Assign new uids starting with shorter ones
-    new_uids = {}
-    for old, new in zip(freq, uidIter(UIDCHARS)):
-        new_uids[old[0]] = ''.join(new)
-
-    log.debug("Replacing block uids...")
-
-    # Replace the old block keys
-    for target in targets:
-        for uid in target["blocks"].copy():
-            target["blocks"][new_uids[uid]] = target["blocks"].pop(uid)
-
-    # Replace uses of the olds uids
-    for uid, usages in uids.items():
-            for key, container in usages:
-                container[key] = new_uids[uid]
-
-def OptimizeVariables(uids, targets):
-    """Optimizes the uids for variable and lists"""
-
-    log.warning("OptimizeVariables allows uid collision.")
-
-    log.debug("Sorting variable uids...")
-    
-    # Sort the uids based on frequency
-    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
-
-    # Assign new ids starting with shorter ones
-    new_uids = {}
-    for old, new in zip(freq, uidIter(UIDCHARS)):
-        new_uids[old[0]] = ''.join(new)
-
-    log.debug("Replacing variable uids...")
-
-    # Replace the old variable keys
-    for target in targets:
-        for uid in target["variables"].copy():
-            target["variables"][new_uids[uid]] = target["variables"].pop(uid)
-        for uid in target["lists"].copy():
-            target["lists"][new_uids[uid]] = target["lists"].pop(uid)
-
-    # Replace uses of the olds uids
-    for uid, usages in uids.items():
-        for key, container in usages:
-            container[key] = new_uids[uid]
-
-def OptimizeBroadcasts(uids, targets):
-    """Optimizes the uids for broadcasts"""
-
-    log.warning("OptimizeBroadcasts allows uid collision.")
-
-    log.debug("Sorting broadcast uids...")
-    
-    # Sort the uids based on frequency
-    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
-
-    # Assign new ids starting with shorter ones
-    new_uids = {}
-    for old, new in zip(freq, uidIter(UIDCHARS)):
-        new_uids[old[0]] = ''.join(new)
-
-    log.debug("Replacing broadcast uids...")
-
-    # Replace the old variable keys
-    for target in targets:
-        for uid in target["broadcasts"].copy():
-            target["broadcasts"][new_uids[uid]] = target["broadcasts"].pop(uid)
-
-    # Replace uses of the olds uids
-    for uid, usages in uids.items():
-        for key, container in usages:
-            container[key] = new_uids[uid]
-
 def RemoveMonitors(sb3, removeVisible=False):
     if removeVisible:
         sb3["monitors"] = []
@@ -306,7 +226,6 @@ def OptimizeValues(values, targets):
     # Optimize input values
     for value in values:
         value[1] = StringToNumber(value[1])
-
 
 class sb3file:
     sb3_file = None # Holds the sb3 file
@@ -440,5 +359,125 @@ class sb3file:
        
         return False
 
+# Depricated
+def OptimizeBlocks(uids, targets):
+    log.debug("Sorting block uids...")
+    
+    log.warning("Optimizing blocks allows uid collision.")
+
+    # Sort the uids based on frequency
+    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
+
+    # Assign new uids starting with shorter ones
+    new_uids = {}
+    for old, new in zip(freq, uidIter(UIDCHARS)):
+        new_uids[old[0]] = ''.join(new)
+
+    log.debug("Replacing block uids...")
+
+    # Replace the old block keys
+    for target in targets:
+        for uid in target["blocks"].copy():
+            target["blocks"][new_uids[uid]] = target["blocks"].pop(uid)
+
+    # Replace uses of the olds uids
+    for uid, usages in uids.items():
+            for key, container in usages:
+                container[key] = new_uids[uid]
+
+# Depricated
+def OptimizeVariables(uids, targets):
+    """Optimizes the uids for variable and lists"""
+
+    log.warning("OptimizeVariables allows uid collision.")
+
+    log.debug("Sorting variable uids...")
+    
+    # Sort the uids based on frequency
+    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
+
+    # Assign new ids starting with shorter ones
+    new_uids = {}
+    for old, new in zip(freq, uidIter(UIDCHARS)):
+        new_uids[old[0]] = ''.join(new)
+
+    log.debug("Replacing variable uids...")
+
+    # Replace the old variable keys
+    for target in targets:
+        for uid in target["variables"].copy():
+            target["variables"][new_uids[uid]] = target["variables"].pop(uid)
+        for uid in target["lists"].copy():
+            target["lists"][new_uids[uid]] = target["lists"].pop(uid)
+
+    # Replace uses of the olds uids
+    for uid, usages in uids.items():
+        for key, container in usages:
+            container[key] = new_uids[uid]
+
+# Depricated
+def OptimizeBroadcasts(uids, targets):
+    """Optimizes the uids for broadcasts"""
+
+    log.warning("OptimizeBroadcasts allows uid collision.")
+
+    log.debug("Sorting broadcast uids...")
+    
+    # Sort the uids based on frequency
+    freq = sorted(uids.items(), key=lambda d: len(d[1]), reverse=True)
+
+    # Assign new ids starting with shorter ones
+    new_uids = {}
+    for old, new in zip(freq, uidIter(UIDCHARS)):
+        new_uids[old[0]] = ''.join(new)
+
+    log.debug("Replacing broadcast uids...")
+
+    # Replace the old variable keys
+    for target in targets:
+        for uid in target["broadcasts"].copy():
+            target["broadcasts"][new_uids[uid]] = target["broadcasts"].pop(uid)
+
+    # Replace uses of the olds uids
+    for uid, usages in uids.items():
+        for key, container in usages:
+            container[key] = new_uids[uid]
+
 if __name__ == "__main__":
-    main()
+    # Parse arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("source", help="path to the source .sb3, defaults to './project.sb3'", nargs="?", default="./project.sb3")
+    parser.add_argument("destination", help="save path, defaults to ./result.sb3", nargs="?", default="./result.sb3")
+    parser.add_argument("-w", "--overwrite", help="overwrite existing files at the destination", action="store_true")
+    parser.add_argument("-d", "--debug", help="save a debug json to './project.json' or './sprite.json' if overwrite is enabled", action="store_true")
+    parser.add_argument("-u", "--optuids", help="shrink block, variable, and broadcast uids", action="store_true")
+    parser.add_argument("-m", "--clmonitors", help="remove all monitors", action="store_true")
+    groupV = parser.add_mutually_exclusive_group()
+    groupV.add_argument("-s", "--silent", help="hide info from log, -ss to hide warnings", action="count", default=0)
+    groupV.add_argument("-v", "--verbosity", help="show debug info", action="count", default=0)
+    args = parser.parse_args()
+    
+    # A bit more parsing
+    read_path = args.source
+    save_path = args.destination
+    overwrite = args.overwrite
+    debug = args.debug
+    uidOpt = args.optuids
+    removeMonitors = args.clmonitors
+    verbosity = args.silent - args.verbosity
+
+    # Get the verbosity level
+    if verbosity == -1:
+        verbosity = 10
+    elif verbosity == 0:
+        verbosity = 20
+    elif verbosity == 1:
+        verbosity = 30
+    elif verbosity == 3:
+        verbosity = 40
+
+    # Configure the logger verbosity
+    log.level = verbosity
+
+    # Run the converter with these arguments
+    main(read_path, save_path, uidOpt, removeMonitors, overwrite, debug)
