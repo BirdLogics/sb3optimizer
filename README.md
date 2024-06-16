@@ -1,5 +1,7 @@
 # sb3optimizer
-Optimizer for the storage size of .sb3 files
+Optimizer for the storage size of .sb3 files.
+
+I made this just to play with the idea and I am no longer maintaining it. I recommend finding a more recent optimizer rather than using this one.
 
 ## Instructions
 1. Download optimizer.py and put it in a folder.
